@@ -305,23 +305,35 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
+  // Idea: Have a PTE_WRITABLE bit 
+  // that denotes whether or not a 
+  // page was previously writable.
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
+
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
+
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
+    if (*pte & PTE_W){
+      *pte &= ~PTE_W;
+      *pte |= PTE_COW;
+    }
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    incmemref((void*) pa);
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      kfree((void*) pa);
       goto err;
     }
   }
@@ -351,10 +363,13 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
+  // printf("asdf");
   uint64 n, va0, pa0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if (cow_allocate(pagetable, va0) == 0) return -1;
+    
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

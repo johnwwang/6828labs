@@ -29,6 +29,48 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+// allocates new page depending on reserved bits set
+// if writable bit set, returns and does nothing (for copyout)
+// if cow bit set, allocates
+// returns 1 upon success, 0 upon error.
+int cow_allocate(pagetable_t pagetable, uint64 va) {
+  
+  if (va >= MAXVA) {
+    return 0;
+  }
+
+  pte_t *pte;
+
+  if((pte = walk(pagetable, va, 1)) == 0)
+    panic("cow_allocate: pte should exist");
+  
+  // for copyout
+  if (*pte & PTE_W) return 1;
+
+  if ((*pte & PTE_U) == 0 || (*pte & PTE_V) == 0 ||( *pte & PTE_COW) == 0) return 0;
+
+  uint64 pa = PTE2PA(*pte);
+  uint flags = PTE_FLAGS(*pte);
+
+  char *mem;
+  if((mem = kalloc()) == 0)
+    return 0;
+
+  memmove(mem, (char*)pa, PGSIZE);
+  // if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
+  //   kfree((void*) mem);
+  //   //uvnumap might need to be here
+  //   return 0;
+  // }
+  // FINISH KALLOC
+  *pte = PA2PTE(mem) | flags;
+  *pte &= ~PTE_COW;
+  *pte |= PTE_W;
+
+  kfree((void*) pa);
+  return 1;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -65,6 +107,10 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 15) {
+    if ((cow_allocate(p->pagetable, r_stval())) == 0) {
+      setkilled(p);
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

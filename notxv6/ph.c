@@ -9,6 +9,7 @@
 #define NKEYS 100000
 
 struct entry {
+  // pthread_mutex_t lock;
   int key;
   int value;
   struct entry *next;
@@ -16,7 +17,7 @@ struct entry {
 struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
-
+pthread_mutex_t locks[NBUCKET];
 
 double
 now()
@@ -30,6 +31,7 @@ static void
 insert(int key, int value, struct entry **p, struct entry *n)
 {
   struct entry *e = malloc(sizeof(struct entry));
+  // pthread_mutex_init(&e->lock, NULL);
   e->key = key;
   e->value = value;
   e->next = n;
@@ -40,12 +42,14 @@ static
 void put(int key, int value)
 {
   int i = key % NBUCKET;
-
   // is the key already present?
+  pthread_mutex_lock(&locks[i]);
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
+    // pthread_mutex_lock(&e->lock);
     if (e->key == key)
       break;
+    // pthread_mutex_unlock(&e->lock);
   }
   if(e){
     // update the existing key.
@@ -54,7 +58,7 @@ void put(int key, int value)
     // the new is new.
     insert(key, value, &table[i], table[i]);
   }
-
+  pthread_mutex_unlock(&locks[i]);
 }
 
 static struct entry*
